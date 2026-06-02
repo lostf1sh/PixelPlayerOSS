@@ -65,6 +65,7 @@ commons-lang3 = "3.20.0"
 jdom2 = "2.0.6.1"
 jose4j = "0.9.6"
 httpclient = "4.5.14"
+orgJson = "20240303"
 
 # DI
 dagger = "2.59.2"
@@ -204,6 +205,7 @@ junit-vintage-engine = { group = "org.junit.vintage", name = "junit-vintage-engi
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 truth = { group = "com.google.truth", name = "truth", version.ref = "truth" }
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 androidx-room-testing = { module = "androidx.room:room-testing", version.ref = "roomRuntime" }
 kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "kotlinx-coroutines" }
 
