@@ -37,7 +37,10 @@ fun AlbumArtImage(
     cornerRadius: Dp
 ) {
     val imageProvider = bitmapData?.let { data ->
-        val cacheKey = AlbumArtBitmapCache.getKey(data)
+        // Fold the target size into the cache key so the same bytes decoded at different sizes
+        // don't collide on one entry (which could serve a smaller cached bitmap to a larger widget).
+        val targetSizePx = (size.value * context.resources.displayMetrics.density).toInt().coerceAtLeast(1)
+        val cacheKey = AlbumArtBitmapCache.getKey(data, targetSizePx, targetSizePx)
         var bitmap = AlbumArtBitmapCache.getBitmap(cacheKey)
 
         if (bitmap == null) {
@@ -48,8 +51,6 @@ fun AlbumArtImage(
                 BitmapFactory.decodeByteArray(data, 0, data.size, options)
 
                 var inSampleSize = 1
-                // Calculate target size in pixels
-                val targetSizePx = (size.value * context.resources.displayMetrics.density).toInt()
 
                 if (options.outHeight > targetSizePx || options.outWidth > targetSizePx) {
                     val halfHeight = options.outHeight / 2

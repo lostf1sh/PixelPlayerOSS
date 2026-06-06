@@ -251,6 +251,25 @@ private fun isLikelySecretKey(keyName: String): Boolean {
     return SECRET_KEY_SUBSTRINGS.any { lower.contains(it) }
 }
 
+// Narrowing guards for backup restore: reject values that would overflow the target type or lose
+// integrality (e.g. a tampered/corrupt backup carrying 1e300 or 3.7 under an int key), returning
+// null so the caller skips the entry instead of silently writing a truncated/saturated value.
+private fun Double.toIntExactPrefOrNull(): Int? =
+    takeIf { it.isFinite() && it >= Int.MIN_VALUE.toDouble() && it <= Int.MAX_VALUE.toDouble() && it % 1.0 == 0.0 }
+        ?.toInt()
+
+private fun Double.toLongExactPrefOrNull(): Long? =
+    takeIf { it.isFinite() && it >= Long.MIN_VALUE.toDouble() && it <= Long.MAX_VALUE.toDouble() && it % 1.0 == 0.0 }
+        ?.toLong()
+
+private fun Long.toIntRangedPrefOrNull(): Int? =
+    takeIf { it in Int.MIN_VALUE.toLong()..Int.MAX_VALUE.toLong() }?.toInt()
+
+private fun Double.toFloatFinitePrefOrNull(): Float? {
+    if (!isFinite()) return null
+    return toFloat().takeIf { it.isFinite() }
+}
+
 @Singleton
 class UserPreferencesRepository
 @Inject
@@ -1883,7 +1902,9 @@ constructor(
             if (clearExisting) {
                 val protectedKeyNames = backupExcludedKeyNames + restorePreservedKeyNames
                 preferences.asMap().keys
-                    .filterNot { key -> key.name in protectedKeyNames }
+                    // Also preserve secret/endpoint keys: export redacts them, so a restore must not
+                    // wipe live credentials that the backup deliberately omitted.
+                    .filterNot { key -> key.name in protectedKeyNames || isLikelySecretKey(key.name) }
                     .forEach { key ->
                         @Suppress("UNCHECKED_CAST")
                         preferences.remove(key as Preferences.Key<Any>)
@@ -1892,6 +1913,11 @@ constructor(
 
             entries.forEach { entry ->
                 if (entry.key in backupExcludedKeyNames) {
+                    return@forEach
+                }
+
+                // Symmetric with export's redaction: never restore secret/endpoint keys from a backup.
+                if (isLikelySecretKey(entry.key)) {
                     return@forEach
                 }
 
@@ -1919,14 +1945,14 @@ constructor(
                     }
                     "int" -> {
                         val value = entry.intValue
-                            ?: entry.doubleValue?.toInt()
-                            ?: entry.longValue?.toInt()
+                            ?: entry.doubleValue?.toIntExactPrefOrNull()
+                            ?: entry.longValue?.toIntRangedPrefOrNull()
                             ?: return@forEach
                         preferences[intPreferencesKey(entry.key)] = value
                     }
                     "long" -> {
                         val value = entry.longValue
-                            ?: entry.doubleValue?.toLong()
+                            ?: entry.doubleValue?.toLongExactPrefOrNull()
                             ?: entry.intValue?.toLong()
                             ?: return@forEach
                         preferences[longPreferencesKey(entry.key)] = value
@@ -1937,7 +1963,7 @@ constructor(
                     }
                     "float" -> {
                         val value = entry.floatValue
-                            ?: entry.doubleValue?.toFloat()
+                            ?: entry.doubleValue?.toFloatFinitePrefOrNull()
                             ?: entry.intValue?.toFloat()
                             ?: entry.longValue?.toFloat()
                             ?: return@forEach

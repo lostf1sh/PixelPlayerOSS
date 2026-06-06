@@ -19,6 +19,9 @@ import javax.inject.Inject
 /** Typed status of the sync banner so the UI can color it without parsing English text (F113). */
 enum class JellyfinSyncStatus { InProgress, Success, Partial, Error }
 
+/** Coarse, user-safe failure category so the banner never surfaces raw backend/exception text. */
+enum class JellyfinSyncErrorReason { Network, Auth, ServerUnavailable, Unknown }
+
 /**
  * Sync banner state. Carries structured data so the UI renders localized strings via
  * stringResource instead of pre-formatted English text (F112).
@@ -51,9 +54,31 @@ sealed interface JellyfinSyncBanner {
         override val status = JellyfinSyncStatus.Success
     }
 
-    data class Failed(val message: String?) : JellyfinSyncBanner {
+    data class Failed(val reason: JellyfinSyncErrorReason) : JellyfinSyncBanner {
         override val status = JellyfinSyncStatus.Error
     }
+}
+
+/**
+ * Maps a sync failure to a coarse, user-safe category and logs the original throwable, so the
+ * banner shows a localized reason instead of leaking raw backend/OkHttp/server text (F112/F113).
+ */
+private fun Throwable.toJellyfinSyncErrorReason(): JellyfinSyncErrorReason = when (this) {
+    is java.net.UnknownHostException,
+    is java.net.ConnectException,
+    is java.net.SocketTimeoutException -> JellyfinSyncErrorReason.ServerUnavailable
+    is retrofit2.HttpException -> when (code()) {
+        401, 403 -> JellyfinSyncErrorReason.Auth
+        in 500..599 -> JellyfinSyncErrorReason.ServerUnavailable
+        else -> JellyfinSyncErrorReason.Network
+    }
+    is java.io.IOException -> JellyfinSyncErrorReason.Network
+    else -> JellyfinSyncErrorReason.Unknown
+}
+
+private fun jellyfinFailedBanner(throwable: Throwable): JellyfinSyncBanner.Failed {
+    Timber.e(throwable, "Jellyfin sync failed")
+    return JellyfinSyncBanner.Failed(throwable.toJellyfinSyncErrorReason())
 }
 
 @HiltViewModel
@@ -99,7 +124,7 @@ class JellyfinDashboardViewModel @Inject constructor(
                         failedCount = summary.failedPlaylistCount
                     )
                 },
-                onFailure = { _syncBanner.value = JellyfinSyncBanner.Failed(it.message) }
+                onFailure = { _syncBanner.value = jellyfinFailedBanner(it) }
             )
             _isSyncing.value = false
         }
@@ -112,7 +137,7 @@ class JellyfinDashboardViewModel @Inject constructor(
             val result = repository.syncPlaylists()
             result.fold(
                 onSuccess = { _syncBanner.value = JellyfinSyncBanner.SyncedPlaylists(it.size) },
-                onFailure = { _syncBanner.value = JellyfinSyncBanner.Failed(it.message) }
+                onFailure = { _syncBanner.value = jellyfinFailedBanner(it) }
             )
             _isSyncing.value = false
         }
@@ -132,7 +157,7 @@ class JellyfinDashboardViewModel @Inject constructor(
                     }
                     _syncBanner.value = JellyfinSyncBanner.SyncedSongs(count)
                 },
-                onFailure = { _syncBanner.value = JellyfinSyncBanner.Failed(it.message) }
+                onFailure = { _syncBanner.value = jellyfinFailedBanner(it) }
             )
             _isSyncing.value = false
         }

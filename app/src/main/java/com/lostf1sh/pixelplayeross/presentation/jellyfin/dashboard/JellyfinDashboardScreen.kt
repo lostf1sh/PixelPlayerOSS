@@ -155,8 +155,15 @@ private fun JellyfinDashboardContent(
                         stringResource(R.string.jellyfin_synced_playlists, banner.count)
                     is JellyfinSyncBanner.SyncedSongs ->
                         stringResource(R.string.jellyfin_synced_songs, banner.count)
-                    is JellyfinSyncBanner.Failed ->
-                        stringResource(R.string.jellyfin_sync_failed, banner.message ?: "")
+                    is JellyfinSyncBanner.Failed -> {
+                        val reasonRes = when (banner.reason) {
+                            JellyfinSyncErrorReason.Network -> R.string.jellyfin_sync_error_network
+                            JellyfinSyncErrorReason.Auth -> R.string.jellyfin_sync_error_auth
+                            JellyfinSyncErrorReason.ServerUnavailable -> R.string.jellyfin_sync_error_server
+                            JellyfinSyncErrorReason.Unknown -> R.string.jellyfin_sync_error_unknown
+                        }
+                        stringResource(R.string.jellyfin_sync_failed, stringResource(reasonRes))
+                    }
                 }
                 val containerColor = when (banner.status) {
                     JellyfinSyncStatus.Error -> MaterialTheme.colorScheme.errorContainer

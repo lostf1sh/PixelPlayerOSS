@@ -119,12 +119,13 @@ class MusicRepositoryImpl @Inject constructor(
     data class CachedDirFilter(val allowedParentDirs: List<String> = emptyList(), val applyFilter: Boolean = false)
 
     /**
-     * Becomes true once [cachedDirFilter] has produced its first real value (i.e. the
-     * DataStore-backed directory preferences have emitted and the filter has been computed).
-     * Until then [cachedDirFilter] still holds the seeded default (applyFilter = false), which
-     * would incorrectly bypass the directory filter for users who have blocked directories.
+     * Holds the most recent real [CachedDirFilter] the instant [cachedDirFilter] computes one — set
+     * in onEach, before the StateFlow's value is updated. Once non-null it is always a real value,
+     * never the seeded default (applyFilter = false). This replaces a volatile Boolean flag whose
+     * "resolved" state could be observed while [cachedDirFilter] still held the default — a race
+     * that would bypass the directory filter and leak blocked-directory songs on a cold read.
      */
-    @Volatile private var dirFilterResolved = false
+    @Volatile private var lastResolvedDirFilter: CachedDirFilter? = null
 
     private val cachedDirFilter: StateFlow<CachedDirFilter> = combine(
         userPreferencesRepository.allowedDirectoriesFlow,
@@ -137,7 +138,7 @@ class MusicRepositoryImpl @Inject constructor(
             normalizePath = ::normalizePath
         )
         CachedDirFilter(dirs, apply)
-    }.onEach { dirFilterResolved = true }
+    }.onEach { lastResolvedDirFilter = it }
         .stateIn(repositoryScope, SharingStarted.Eagerly, CachedDirFilter())
 
     /**
@@ -147,7 +148,7 @@ class MusicRepositoryImpl @Inject constructor(
      * songs could leak into queues/library on the first access after process start.
      */
     private suspend fun resolvedDirFilter(): CachedDirFilter {
-        if (dirFilterResolved) return cachedDirFilter.value
+        lastResolvedDirFilter?.let { return it }
         val allowedDirs = userPreferencesRepository.allowedDirectoriesFlow.first()
         val blockedDirs = userPreferencesRepository.blockedDirectoriesFlow.first()
         val (allowedParentDirs, applyFilter) = computeAllowedDirs(allowedDirs, blockedDirs)

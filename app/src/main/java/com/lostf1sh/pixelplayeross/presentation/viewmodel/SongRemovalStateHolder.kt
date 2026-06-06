@@ -67,7 +67,9 @@ class SongRemovalStateHolder @Inject constructor(
         // state is an in-library song with no playlist entry (cosmetically harmless and
         // self-correcting) rather than a playlist holding a dangling, deleted song id.
         playlistPreferencesRepository.removeSongFromAllPlaylists(song.id)
-        musicRepository.deleteById(song.id.toLong())
+        // Song.id is numeric only for local MediaStore songs; cloud (Navidrome/Jellyfin) ids are
+        // non-numeric strings, so guard the parse instead of force-casting it (which would throw).
+        song.id.toLongOrNull()?.let { musicRepository.deleteById(it) }
         libraryStateHolder.removeSong(song.id)
     }
 }

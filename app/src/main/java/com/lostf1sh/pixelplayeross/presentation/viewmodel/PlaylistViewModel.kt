@@ -1113,7 +1113,15 @@ class PlaylistViewModel @Inject constructor(
                             val finalize = android.content.ContentValues().apply {
                                 put(MediaStore.Audio.Media.IS_PENDING, 0)
                             }
-                            resolver.update(itemUri, finalize, null, null)
+                            val updated = resolver.update(itemUri, finalize, null, null)
+                            if (updated != 1) {
+                                // Item stays IS_PENDING (invisible to other apps) if finalize didn't
+                                // apply; throw so the catch below removes the half-written entry.
+                                throw IOException(
+                                    "Failed to finalize MediaStore item for ${playlist.name} " +
+                                        "(update count=$updated, uri=$itemUri)"
+                                )
+                            }
                             Timber.tag("PlaylistViewModel").d("Exported playlist '${playlist.name}' to $itemUri")
                         } catch (e: Exception) {
                             // Remove the half-written pending entry so it does not linger.

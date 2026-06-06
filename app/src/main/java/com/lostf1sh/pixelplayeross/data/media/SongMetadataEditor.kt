@@ -561,63 +561,47 @@ class SongMetadataEditor(
      * original is left intact and the staging file is cleaned up, so an interrupted/failed write
      * (disk full, transient I/O, process kill) cannot corrupt or zero out the user's media file.
      *
-     * Falls back to a guarded copy-into-place only if a same-directory staging file cannot be created
-     * (e.g. read-only parent), and even then the original is overwritten only after the staged bytes
-     * are durably written.
+     * If a same-directory staging file cannot be created or the atomic rename fails, the edit is
+     * failed (returns false) rather than overwriting the original in place: an in-place copy must
+     * open the original for truncation, so a mid-write failure (disk full, kill) would corrupt or
+     * zero out the user's media file — exactly what this routine exists to prevent.
      */
     private fun safelyReplaceFileContents(target: File, source: File): Boolean {
         val parent = target.absoluteFile.parentFile
-        val staging = if (parent != null) {
-            File(parent, ".${target.name}.metaedit_${System.nanoTime()}.tmp")
-        } else {
-            null
+        if (parent == null) {
+            // No directory to stage a sibling temp file in, so an atomic same-filesystem rename is
+            // impossible. Refuse rather than truncate the original with an in-place overwrite.
+            Timber.tag(TAG).e(
+                "METADATA_EDIT: No parent directory for ${target.absolutePath}; refusing in-place overwrite"
+            )
+            return false
         }
 
-        if (staging != null) {
-            return try {
-                source.inputStream().use { input ->
-                    FileOutputStream(staging).use { out ->
-                        input.copyTo(out)
-                        out.fd.sync()
-                    }
-                }
-                val renamed = staging.renameTo(target)
-                if (renamed) {
-                    true
-                } else {
-                    // renameTo can fail across odd filesystems; fall back to a verified copy-in-place
-                    // using the already-durable staging file as the source of truth.
-                    Timber.tag(TAG).w(
-                        "METADATA_EDIT: Atomic rename to ${target.absolutePath} failed; falling back to copy-in-place"
-                    )
-                    copyIntoPlaceDurably(target, staging)
-                }
-            } catch (e: Exception) {
-                Timber.tag(TAG).e(e, "METADATA_EDIT: Safe replace failed for ${target.absolutePath}")
-                false
-            } finally {
-                if (staging.exists() && !staging.delete()) {
-                    Timber.tag(TAG).w("METADATA_EDIT: Could not delete staging file ${staging.absolutePath}")
-                }
-            }
-        }
-
-        // No writable parent for staging: copy directly but still fsync so bytes are durable.
-        return copyIntoPlaceDurably(target, source)
-    }
-
-    private fun copyIntoPlaceDurably(target: File, source: File): Boolean {
+        val staging = File(parent, ".${target.name}.metaedit_${System.nanoTime()}.tmp")
         return try {
             source.inputStream().use { input ->
-                FileOutputStream(target, false).use { output ->
-                    input.copyTo(output)
-                    output.fd.sync()
+                FileOutputStream(staging).use { out ->
+                    input.copyTo(out)
+                    out.fd.sync()
                 }
             }
-            true
+            val renamed = staging.renameTo(target)
+            if (!renamed) {
+                // renameTo can fail across odd filesystems. Rather than fall back to an in-place
+                // copy that truncates the original (a mid-copy failure would corrupt the user's
+                // media file), fail the edit and leave the original intact.
+                Timber.tag(TAG).e(
+                    "METADATA_EDIT: Atomic rename to ${target.absolutePath} failed; refusing in-place overwrite to protect the original"
+                )
+            }
+            renamed
         } catch (e: Exception) {
-            Timber.tag(TAG).e(e, "METADATA_EDIT: Copy-in-place failed for ${target.absolutePath}")
+            Timber.tag(TAG).e(e, "METADATA_EDIT: Safe replace failed for ${target.absolutePath}")
             false
+        } finally {
+            if (staging.exists() && !staging.delete()) {
+                Timber.tag(TAG).w("METADATA_EDIT: Could not delete staging file ${staging.absolutePath}")
+            }
         }
     }
 

@@ -30,11 +30,15 @@ class MediaStorePagingSource(
     override fun getRefreshKey(state: PagingState<Int, Song>): Int? {
         // Keys are absolute item offsets into filteredIds. Recover the offset of the
         // page closest to the anchor so a refresh reloads from roughly the same spot,
-        // independent of any per-load loadSize variation.
+        // independent of any per-load loadSize variation. Use the anchor page's actual
+        // loaded size rather than config.pageSize — the latter is wrong for the initial
+        // load (initialLoadSize defaults to 3 * pageSize) and would skip items on refresh.
         return state.anchorPosition?.let { anchorPosition ->
             val anchorPage = state.closestPageToPosition(anchorPosition)
-            anchorPage?.prevKey?.plus(state.config.pageSize)
-                ?: anchorPage?.nextKey?.minus(state.config.pageSize)
+            val loadedPageSize = anchorPage?.data?.size?.takeIf { it > 0 }
+                ?: state.config.pageSize
+            anchorPage?.prevKey?.plus(loadedPageSize)
+                ?: anchorPage?.nextKey?.minus(loadedPageSize)
         }
     }
 

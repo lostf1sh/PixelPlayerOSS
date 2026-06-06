@@ -27,17 +27,23 @@ object AlbumArtBitmapCache {
         lruCache.put(key, bitmap)
     }
 
-    fun getKey(byteArray: ByteArray): String {
+    fun getKey(byteArray: ByteArray, width: Int, height: Int): String {
         // Use a strong content digest (SHA-256) instead of the 32-bit
         // contentHashCode() so two distinct album-art byte arrays do not collide
-        // onto the same cache entry and surface the wrong artwork.
+        // onto the same cache entry and surface the wrong artwork. The render
+        // dimensions are appended so the same bytes decoded at different sizes get
+        // distinct entries — a smaller cached bitmap is never served to a larger slot.
         val digest = MessageDigest.getInstance("SHA-256").digest(byteArray)
-        return buildString(digest.size * 2) {
+        return buildString(digest.size * 2 + 12) {
             for (b in digest) {
                 val v = b.toInt() and 0xFF
                 append(HEX_CHARS[v ushr 4])
                 append(HEX_CHARS[v and 0x0F])
             }
+            append('@')
+            append(width)
+            append('x')
+            append(height)
         }
     }
 

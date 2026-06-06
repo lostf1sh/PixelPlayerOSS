@@ -72,6 +72,9 @@ class PixelPlayerGlanceWidget : GlanceAppWidget() {
         private val EXTRA_LARGE_LAYOUT_SIZE = DpSize(width = 300.dp, height = 220.dp)
         private val EXTRA_LARGE_PLUS_LAYOUT_SIZE = DpSize(width = 350.dp, height = 260.dp)
         private val HUGE_LAYOUT_SIZE = DpSize(width = 400.dp, height = 300.dp)
+
+        // Number of queue thumbnails the ExtraLarge layout actually renders; prewarm matches it.
+        private const val EXTRA_LARGE_QUEUE_THUMBNAIL_COUNT = 4
     }
 
     override val sizeMode = SizeMode.Exact
@@ -119,9 +122,10 @@ class PixelPlayerGlanceWidget : GlanceAppWidget() {
                 }
             }
 
-            // Queue thumbnails (ExtraLarge layout) decode at 58.dp; match that exactly.
+            // Queue thumbnails (ExtraLarge layout) decode at 58.dp; match that exactly. Only the
+            // first EXTRA_LARGE_QUEUE_THUMBNAIL_COUNT items are ever rendered, so don't prewarm more.
             val queueTargetPx = (58f * density).toInt().coerceAtLeast(1)
-            playerInfo.queue.forEach { item ->
+            playerInfo.queue.take(EXTRA_LARGE_QUEUE_THUMBNAIL_COUNT).forEach { item ->
                 item.albumArtUri?.let { rawUri ->
                     decodeIntoCacheIfAbsent(context, rawUri, queueTargetPx)
                 }
@@ -1112,11 +1116,11 @@ class PixelPlayerGlanceWidget : GlanceAppWidget() {
                         .height(58.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val items = queue.take(4)
+                    val items = queue.take(EXTRA_LARGE_QUEUE_THUMBNAIL_COUNT)
                     val itemSize = 58.dp
                     val cornerRadius = 14.dp
 
-                    for (i in 0 until 4) {
+                    for (i in 0 until EXTRA_LARGE_QUEUE_THUMBNAIL_COUNT) {
                         Box(
                             modifier = GlanceModifier.defaultWeight(),
                             contentAlignment = Alignment.Center
@@ -1173,7 +1177,21 @@ class PixelPlayerGlanceWidget : GlanceAppWidget() {
         val widgetDpSize = LocalSize.current // Get the actual size of the composable
 
         val imageProvider = bitmapData?.let { data ->
-            val cacheKey = AlbumArtBitmapCache.getKey(data)
+            // Compute the target size first so it can be folded into the cache key — otherwise the
+            // same bytes decoded for differently-sized widgets would collide on one entry and a
+            // smaller cached bitmap could be served to a larger widget.
+            val (targetWidthPx, targetHeightPx) = with(context.resources.displayMetrics) {
+                if (size != null) {
+                    // Square logic when an explicit size is provided.
+                    val targetSizePx = (size.value * density).toInt().coerceAtLeast(1)
+                    targetSizePx to targetSizePx
+                } else {
+                    // Otherwise use the actual widget size.
+                    (widgetDpSize.width.value * density).toInt().coerceAtLeast(1) to
+                        (widgetDpSize.height.value * density).toInt().coerceAtLeast(1)
+                }
+            }
+            val cacheKey = AlbumArtBitmapCache.getKey(data, targetWidthPx, targetHeightPx)
             var bitmap = AlbumArtBitmapCache.getBitmap(cacheKey)
 
             if (bitmap != null) {
@@ -1189,24 +1207,6 @@ class PixelPlayerGlanceWidget : GlanceAppWidget() {
                     val imageHeight = options.outHeight
                     val imageWidth = options.outWidth
                     var inSampleSize = 1
-
-                    // Determine target size in pixels
-                    val targetWidthPx: Int
-                    val targetHeightPx: Int
-                    with(context.resources.displayMetrics) {
-                        if (size != null) {
-                            // If size is provided, use it for both width and height (maintains square logic)
-                            val targetSizePx = (size.value * density).toInt()
-                            targetWidthPx = targetSizePx
-                            targetHeightPx = targetSizePx
-                            Timber.tag(TAG_AAIG).d("Target Px size for Dp $size: $targetSizePx")
-                        } else {
-                            // If size is not provided, use the actual widget size
-                            targetWidthPx = (widgetDpSize.width.value * density).toInt()
-                            targetHeightPx = (widgetDpSize.height.value * density).toInt()
-                            Timber.tag(TAG_AAIG).d("Target Px size from widget DpSize ${widgetDpSize}: ${targetWidthPx}x${targetHeightPx}")
-                        }
-                    }
 
                     if (imageHeight > targetHeightPx || imageWidth > targetWidthPx) {
                         val halfHeight: Int = imageHeight / 2

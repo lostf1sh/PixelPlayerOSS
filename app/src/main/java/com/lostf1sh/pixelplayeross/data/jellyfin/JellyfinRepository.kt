@@ -359,11 +359,15 @@ class JellyfinRepository @Inject constructor(
         return withContext(Dispatchers.IO) {
             var syncedSongCount = 0
             var failedPlaylistCount = 0
+            var allOperationsSucceeded = true
 
             val libResult = syncLibrarySongs()
             libResult.fold(
                 onSuccess = { count -> syncedSongCount += count },
-                onFailure = { Timber.w(it, "$TAG: Failed syncing library songs") }
+                onFailure = {
+                    allOperationsSucceeded = false
+                    Timber.w(it, "$TAG: Failed syncing library songs")
+                }
             )
 
             val playlistResult = syncPlaylists().getOrElse {
@@ -391,11 +395,15 @@ class JellyfinRepository @Inject constructor(
             try {
                 syncUnifiedLibrarySongsFromJellyfin()
             } catch (e: Exception) {
+                allOperationsSucceeded = false
                 Timber.e(e, "$TAG: Failed to sync unified library")
             }
 
-            // Mark a successful full sync so the dashboard/home don't re-sync on every open (F111).
-            lastFullSyncTime = System.currentTimeMillis()
+            // Only mark a successful full sync when every step actually succeeded; otherwise leave
+            // lastFullSyncTime unchanged so the stale-gate retries instead of caching a partial sync (F111).
+            if (allOperationsSucceeded && failedPlaylistCount == 0) {
+                lastFullSyncTime = System.currentTimeMillis()
+            }
 
             Result.success(
                 BulkSyncResult(

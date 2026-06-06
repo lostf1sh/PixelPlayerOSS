@@ -44,12 +44,13 @@ private val MOJIBAKE_LEAD_REGEX =
     Regex("[ÂÃÅ][-¿$WINDOWS_1252_SPECIALS]")
 
 /**
- * The smart-quote / em-dash family (UTF-8 0xE2 0x80 0xXX) misreads to 'â' followed by
- * a Windows-1252 special punctuation glyph. 'â' on its own is a legitimate letter, so
- * only these two-character pairs are treated as mojibake.
+ * The smart-quote / em-dash family (UTF-8 0xE2 0x80 0xXX) misreads to 'â' followed by a
+ * Windows-1252 special punctuation glyph, or — when the trailing bytes are decoded as
+ * ISO-8859-1 rather than Windows-1252 — by a U+0080–U+00BF character. 'â' on its own is a
+ * legitimate letter, so only these two-character pairs are treated as mojibake.
  */
 private val MOJIBAKE_PUNCTUATION_REGEX =
-    Regex("â[$WINDOWS_1252_SPECIALS]")
+    Regex("â[-¿$WINDOWS_1252_SPECIALS]")
 
 private fun String.hasMojibakeSignature(): Boolean =
     MOJIBAKE_LEAD_REGEX.containsMatchIn(this) || MOJIBAKE_PUNCTUATION_REGEX.containsMatchIn(this)

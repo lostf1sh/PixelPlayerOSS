@@ -785,7 +785,10 @@ constructor(
             // there to avoid spuriously reprocessing every song each incremental sync.
             // User-edited genres are honored via genreUserEdited, like title/artist/album.
             (existing.genreUserEdited || raw.genre == null || existing.genre == raw.genre) &&
-            existing.albumArtist == raw.albumArtist &&
+            // Like genre: only a change signal when the cursor actually supplied an album artist.
+            // MediaStore's ALBUM_ARTIST is often null/blank, which would otherwise spuriously
+            // reprocess songs whose existing album artist was resolved from tag metadata.
+            (raw.albumArtist == null || existing.albumArtist == raw.albumArtist) &&
             existingDateAddedSeconds == raw.dateAdded &&
             existingDateModifiedSeconds == raw.dateModified
     }
